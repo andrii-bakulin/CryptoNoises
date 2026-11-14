@@ -1,0 +1,48 @@
+-- CryptoNoises: reference data for `exceptions` (main database). Load with: sql/data/load.sh main <database>
+
+-- Tokens / contracts whose offers are not sent to holders (Models\Exceptions, TezosHelper::GetTokenHolders): they have
+-- too many active holders to notify (the code adds a token itself at >= Config::kMaxActiveHoldersForOffer).
+-- token_id NULL = the whole contract. AUTOFIX rows were added by the code, MANUAL rows by hand.
+-- `hits` is a runtime counter and is not seeded (starts from its DEFAULT)
+INSERT INTO `exceptions` (`exception_type`, `token_address`, `token_id`, `ts_created`, `notice`) VALUES
+  ('token.offer.ignore', 'KT1AaaBSo5AE6Eo8fpEN5xhCD4w3kHStafxk', '22', '2022-02-20 04:11:26', 'AUTOFIX: Too many active-holders @ObjktCom.V2 (24720)'),
+  ('token.offer.ignore', 'KT1BRADdqGk2eLmMqvyWzqVmPQ1RCBCbW5dY', '1', '2023-03-03 11:28:12', 'AUTOFIX: Too many active-holders (21565)'),
+  ('token.offer.ignore', 'KT1BRADdqGk2eLmMqvyWzqVmPQ1RCBCbW5dY', '2', '2023-03-17 13:15:44', 'AUTOFIX: Too many active-holders (11686)'),
+  ('token.offer.ignore', 'KT1BRADdqGk2eLmMqvyWzqVmPQ1RCBCbW5dY', '3', '2023-03-31 12:37:52', 'AUTOFIX: Too many active-holders (13383)'),
+  ('token.offer.ignore', 'KT1BRADdqGk2eLmMqvyWzqVmPQ1RCBCbW5dY', '4', '2023-04-28 21:15:35', 'AUTOFIX: Too many active-holders (43493)'),
+  ('token.offer.ignore', 'KT1BRADdqGk2eLmMqvyWzqVmPQ1RCBCbW5dY', '5', '2023-05-05 11:44:27', 'AUTOFIX: Too many active-holders (14743)'),
+  ('token.offer.ignore', 'KT1BRADdqGk2eLmMqvyWzqVmPQ1RCBCbW5dY', '6', '2023-05-27 10:57:48', 'AUTOFIX: Too many active-holders (181096)'),
+  ('token.offer.ignore', 'KT1BRADdqGk2eLmMqvyWzqVmPQ1RCBCbW5dY', '7', '2023-06-04 07:33:19', 'AUTOFIX: Too many active-holders (181051)'),
+  ('token.offer.ignore', 'KT1BRADdqGk2eLmMqvyWzqVmPQ1RCBCbW5dY', '9', '2023-06-30 16:24:03', 'AUTOFIX: Too many active-holders (115223)'),
+  ('token.offer.ignore', 'KT1BRADdqGk2eLmMqvyWzqVmPQ1RCBCbW5dY', '11', '2023-07-21 18:43:08', 'AUTOFIX: Too many active-holders (108085)'),
+  ('token.offer.ignore', 'KT1BRADdqGk2eLmMqvyWzqVmPQ1RCBCbW5dY', '14', '2023-10-22 09:07:09', 'AUTOFIX: Too many active-holders (106751)'),
+  ('token.offer.ignore', 'KT1BRADdqGk2eLmMqvyWzqVmPQ1RCBCbW5dY', '15', '2023-09-01 19:04:48', 'AUTOFIX: Too many active-holders (21037)'),
+  ('token.offer.ignore', 'KT1BRADdqGk2eLmMqvyWzqVmPQ1RCBCbW5dY', '17', '2023-10-22 09:08:33', 'AUTOFIX: Too many active-holders (81484)'),
+  ('token.offer.ignore', 'KT1BRADdqGk2eLmMqvyWzqVmPQ1RCBCbW5dY', '18', '2023-10-08 08:58:22', 'AUTOFIX: Too many active-holders (61096)'),
+  ('token.offer.ignore', 'KT1BRADdqGk2eLmMqvyWzqVmPQ1RCBCbW5dY', '23', '2024-03-05 15:45:30', 'AUTOFIX: Too many active-holders (40083)'),
+  ('token.offer.ignore', 'KT1BRhcRAdLia3XQT1mPSofHyrmYpRddgj3s', '6', '2022-02-19 15:30:04', 'AUTOFIX: Too many active-holders @ObjktCom.V2 (39891)'),
+  ('token.offer.ignore', 'KT1BRhcRAdLia3XQT1mPSofHyrmYpRddgj3s', NULL, '2022-02-19 14:58:48', 'MANUAL: Offers ignored for the whole contract'),
+  ('token.offer.ignore', 'KT1KrTm6Aei9zp6UH7zYi5EUx23PAvcoK5B5', NULL, '2022-02-02 03:32:18', 'MANUAL: SARS-COV-2 collection (whole contract)'),
+  ('token.offer.ignore', 'KT1LBXXg9UFvyfdvPmRMc4JZQsYWdyPCS6ue', '1', '2023-08-14 03:59:11', 'AUTOFIX: Too many active-holders (10402)'),
+  ('token.offer.ignore', 'KT1LBXXg9UFvyfdvPmRMc4JZQsYWdyPCS6ue', '2', '2023-08-25 01:25:34', 'AUTOFIX: Too many active-holders (11578)'),
+  ('token.offer.ignore', 'KT1LBXXg9UFvyfdvPmRMc4JZQsYWdyPCS6ue', '3', '2023-09-15 04:55:35', 'AUTOFIX: Too many active-holders (11303)'),
+  ('token.offer.ignore', 'KT1LBXXg9UFvyfdvPmRMc4JZQsYWdyPCS6ue', '4', '2023-09-28 16:13:54', 'AUTOFIX: Too many active-holders (11642)'),
+  ('token.offer.ignore', 'KT1LBXXg9UFvyfdvPmRMc4JZQsYWdyPCS6ue', '16', '2024-02-05 16:32:17', 'AUTOFIX: Too many active-holders (20107)'),
+  ('token.offer.ignore', 'KT1LBXXg9UFvyfdvPmRMc4JZQsYWdyPCS6ue', '17', '2024-01-20 10:08:03', 'AUTOFIX: Too many active-holders (25117)'),
+  ('token.offer.ignore', 'KT1LBXXg9UFvyfdvPmRMc4JZQsYWdyPCS6ue', '19', '2023-12-31 15:45:17', 'AUTOFIX: Too many active-holders (20131)'),
+  ('token.offer.ignore', 'KT1LBXXg9UFvyfdvPmRMc4JZQsYWdyPCS6ue', '21', '2024-01-29 06:59:37', 'AUTOFIX: Too many active-holders (13586)'),
+  ('token.offer.ignore', 'KT1LBXXg9UFvyfdvPmRMc4JZQsYWdyPCS6ue', '22', '2024-02-07 19:41:23', 'AUTOFIX: Too many active-holders (15732)'),
+  ('token.offer.ignore', 'KT1LBXXg9UFvyfdvPmRMc4JZQsYWdyPCS6ue', '23', '2024-02-05 09:58:20', 'AUTOFIX: Too many active-holders (15510)'),
+  ('token.offer.ignore', 'KT1LBXXg9UFvyfdvPmRMc4JZQsYWdyPCS6ue', '24', '2024-02-23 05:44:07', 'AUTOFIX: Too many active-holders (11046)'),
+  ('token.offer.ignore', 'KT1LBXXg9UFvyfdvPmRMc4JZQsYWdyPCS6ue', '27', '2024-04-01 01:06:09', 'AUTOFIX: Too many active-holders (11762)'),
+  ('token.offer.ignore', 'KT1LBXXg9UFvyfdvPmRMc4JZQsYWdyPCS6ue', '28', '2024-04-07 09:48:00', 'AUTOFIX: Too many active-holders (13121)'),
+  ('token.offer.ignore', 'KT1LBXXg9UFvyfdvPmRMc4JZQsYWdyPCS6ue', '30', '2024-04-25 04:13:41', 'AUTOFIX: Too many active-holders (15726)'),
+  ('token.offer.ignore', 'KT1LBXXg9UFvyfdvPmRMc4JZQsYWdyPCS6ue', '31', '2024-04-30 12:26:45', 'AUTOFIX: Too many active-holders (16157)'),
+  ('token.offer.ignore', 'KT1LBXXg9UFvyfdvPmRMc4JZQsYWdyPCS6ue', '32', '2024-05-11 05:37:54', 'AUTOFIX: Too many active-holders (10875)'),
+  ('token.offer.ignore', 'KT1LBXXg9UFvyfdvPmRMc4JZQsYWdyPCS6ue', '33', '2024-05-14 05:21:14', 'AUTOFIX: Too many active-holders (13290)'),
+  ('token.offer.ignore', 'KT1LBXXg9UFvyfdvPmRMc4JZQsYWdyPCS6ue', '34', '2024-06-11 06:16:49', 'AUTOFIX: Too many active-holders (12325)'),
+  ('token.offer.ignore', 'KT1LBXXg9UFvyfdvPmRMc4JZQsYWdyPCS6ue', '35', '2024-06-10 06:01:23', 'AUTOFIX: Too many active-holders (10330)'),
+  ('token.offer.ignore', 'KT1LBXXg9UFvyfdvPmRMc4JZQsYWdyPCS6ue', '36', '2024-05-22 04:50:54', 'AUTOFIX: Too many active-holders (13511)'),
+  ('token.offer.ignore', 'KT1QgfSE4C1dX9UqrPAXjUaFQ36F9eB4nNkV', NULL, '2023-07-31 13:59:19', 'MANUAL: Too many active-holders (whole contract)'),
+  ('token.offer.ignore', 'KT1UxMVVrK2pbYYEtwes1zKYdpYnzoZ6yPKC', '18', '2022-04-26 12:52:50', 'AUTOFIX: Too many active-holders @ObjktCom.V2 (24981)'),
+  ('token.offer.ignore', 'KT1XNJ67F3JN2cmq6s1LmqtVg7gy9tCcN4E2', NULL, '2023-07-31 10:08:04', 'MANUAL: Offers on these tokens stalled the offers processing');

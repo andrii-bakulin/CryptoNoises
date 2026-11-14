@@ -1,0 +1,22 @@
+# Local configuration (see config/*.example.php)
+config/consts-secrets.php
+config/environment.php
+
+# Dependencies
+vendor/
+
+# Runtime data
+log/*
+!log/.gitkeep
+external-ipfs/*
+!external-ipfs/.gitkeep
+external-storage/*
+!external-storage/.gitkeep
+
+# Review / scratch output
+scratch/
+
+# Tooling / OS
+.idea/
+.claude/
+.DS_Store

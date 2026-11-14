@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Start Discord bot threads: bin/discord-start [all|main-loop|notifier|assistant]
+
+source "$(dirname "$0")/_discord-common.sh"
+
+SCOPE="$(discord_parse_scope "${1:-all}")"
+
+discord_start "$SCOPE"
+sleep 1
+discord_show_threads

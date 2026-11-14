@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Stop Discord bot threads: bin/discord-stop [all|main-loop|notifier|assistant]
+
+source "$(dirname "$0")/_discord-common.sh"
+
+SCOPE="$(discord_parse_scope "${1:-all}")"
+
+discord_stop "$SCOPE"
+discord_show_threads

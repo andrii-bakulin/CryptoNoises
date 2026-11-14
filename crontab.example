@@ -1,0 +1,112 @@
+# CryptoNoises cron jobs (format of /etc/cron.d/*: the 6th column is the system user).
+# Copy to /etc/cron.d/cryptonoises, replace /path/to/project and www-data, then enable jobs gradually:
+# blockchain sync first, then analyzers and background jobs, Discord / Telegram bots last.
+#
+# Sync, analyze, job and notifier commands protect themselves against parallel runs, so "every minute" is safe.
+# Jobs with threadIdx / threadCnt split one queue between N parallel workers - tune the counts to your hardware.
+
+MAILTO=""
+
+#=======================================================================================================================
+# Tezos indexer (commands/run-tezos)
+#=======================================================================================================================
+
+# Blockchain sync (TzKT -> log tables) + removal of old log tables
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /blockchain/transaction/sync-new
+0    *  *  *  *  www-data  /path/to/project/commands/run-tezos /blockchain/transaction/cleanup offset=50000
+
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /blockchain/bigmap-updates/sync-new
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /blockchain/bigmap-updates/sync-check thread-id=1 offset=2     # re-check blocks ~1 min back
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /blockchain/bigmap-updates/sync-check thread-id=2 offset=120   # re-check blocks ~1 hour back
+0    *  *  *  *  www-data  /path/to/project/commands/run-tezos /blockchain/bigmap-updates/cleanup offset=50000
+
+# Analyzers
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /analyze/transactions/new
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /analyze/bigmap-updates/new limit=50000
+
+# Background jobs (queues)
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-contracts-metadata threadIdx=0 threadCnt=4
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-contracts-metadata threadIdx=1 threadCnt=4
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-contracts-metadata threadIdx=2 threadCnt=4
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-contracts-metadata threadIdx=3 threadCnt=4
+
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=detect-new-tokens threadIdx=0 threadCnt=4
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=detect-new-tokens threadIdx=1 threadCnt=4
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=detect-new-tokens threadIdx=2 threadCnt=4
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=detect-new-tokens threadIdx=3 threadCnt=4
+
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-tokens-metadata threadIdx=0 threadCnt=10
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-tokens-metadata threadIdx=1 threadCnt=10
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-tokens-metadata threadIdx=2 threadCnt=10
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-tokens-metadata threadIdx=3 threadCnt=10
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-tokens-metadata threadIdx=4 threadCnt=10
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-tokens-metadata threadIdx=5 threadCnt=10
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-tokens-metadata threadIdx=6 threadCnt=10
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-tokens-metadata threadIdx=7 threadCnt=10
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-tokens-metadata threadIdx=8 threadCnt=10
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-tokens-metadata threadIdx=9 threadCnt=10
+
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=merge-tokens-metadata
+
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-ipfs.primary threadIdx=0 threadCnt=10
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-ipfs.primary threadIdx=1 threadCnt=10
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-ipfs.primary threadIdx=2 threadCnt=10
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-ipfs.primary threadIdx=3 threadCnt=10
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-ipfs.primary threadIdx=4 threadCnt=10
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-ipfs.primary threadIdx=5 threadCnt=10
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-ipfs.primary threadIdx=6 threadCnt=10
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-ipfs.primary threadIdx=7 threadCnt=10
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-ipfs.primary threadIdx=8 threadCnt=10
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-ipfs.primary threadIdx=9 threadCnt=10
+
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-ipfs.secondary threadIdx=0 threadCnt=3
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-ipfs.secondary threadIdx=1 threadCnt=3
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-ipfs.secondary threadIdx=2 threadCnt=3
+
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-profiles threadIdx=0 threadCnt=10
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-profiles threadIdx=1 threadCnt=10
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-profiles threadIdx=2 threadCnt=10
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-profiles threadIdx=3 threadCnt=10
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-profiles threadIdx=4 threadCnt=10
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-profiles threadIdx=5 threadCnt=10
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-profiles threadIdx=6 threadCnt=10
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-profiles threadIdx=7 threadCnt=10
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-profiles threadIdx=8 threadCnt=10
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/exec jobId=sync-profiles threadIdx=9 threadCnt=10
+
+# Maintenance
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/clean/file-cache
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/clean/media-convert-zombies
+*/1  *  *  *  *  www-data  /path/to/project/commands/run-tezos /jobs/recover-dead-jobs
+
+#=======================================================================================================================
+# Bots + API (commands/run)
+#=======================================================================================================================
+
+# Events: blockchain -> notifications
+*/1  *  *  *  *  www-data  /path/to/project/commands/run /tezos-network/analyze-transactions/new
+*/1  *  *  *  *  www-data  /path/to/project/commands/run /tezos-network/wallets/sync
+*/1  *  *  *  *  www-data  /path/to/project/commands/run /events/nfts-mint/tezos
+*/1  *  *  *  *  www-data  /path/to/project/commands/run /events/nfts-updates/tezos
+
+# Exchange rates
+*/1  *  *  *  *  www-data  /path/to/project/commands/run /coingecko/sync
+
+# Tezos domains expiry
+*/10 *  *  *  *  www-data  /path/to/project/commands/run /jobs/exec jobId=domains-expiry-find-new
+*/1  *  *  *  *  www-data  /path/to/project/commands/run /jobs/exec jobId=domains-expiry
+0    12 *  *  *  www-data  /path/to/project/commands/run /jobs/exec jobId=domains-expiry-cleanup
+
+# Maintenance
+*/1  *  *  *  *  www-data  /path/to/project/commands/run /jobs/recover-dead-jobs
+*/1  *  *  *  *  www-data  /path/to/project/commands/run /lifecycle/check/error-logs
+*/1  *  *  *  *  www-data  /path/to/project/commands/run /lifecycle/clean-up/user-actions
+*/10 *  *  *  *  www-data  /path/to/project/commands/run /lifecycle/clean-up/events-flow
+*/30 *  *  *  *  www-data  /path/to/project/commands/run /lifecycle/clean-up/callback-actions
+1    0  *  *  *  www-data  /path/to/project/commands/run /lifecycle/clean-up/old-data
+30   23 *  *  *  www-data  /path/to/project/commands/run /lifecycle/prepare/tables
+
+# Bots (enable last): Telegram notifiers + Discord threads (start only the threads that are not running)
+*/1  *  *  *  *  www-data  /path/to/project/commands/run /telegram/notifier/events-flow
+*/1  *  *  *  *  www-data  /path/to/project/commands/run /telegram/notifier/inform-flow
+*/1  *  *  *  *  www-data  /path/to/project/bin/discord-start

@@ -1,0 +1,41 @@
+{
+    "name": "andrii-bakulin/cryptonoises",
+    "description": "Telegram and Discord bots for Tezos wallet / NFT activity, with a Tezos indexer",
+    "type": "project",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Andrii Bakulin",
+            "email": "andrii.bakulin@gmail.com"
+        }
+    ],
+    "require": {
+        "bcosca/fatfree": "^3.6",
+
+        "davtur19/turibot": "^1.11",
+        "ext-curl": "*",
+        "ext-json": "*",
+        "ext-mbstring": "*",
+        "ext-fileinfo": "*",
+        "ext-gd": "*",
+        "ext-pdo": "*",
+        "ext-pdo_mysql": "*",
+
+        "team-reflex/discord-php": "^7.0"
+    },
+    "autoload": {
+        "files": [
+            "config/VssCfg.php"
+        ],
+        "psr-4": {
+            "CryptoCore\\": "src/CryptoCore",
+            "CryptoNoises\\": "src/CryptoNoises",
+            "CryptoNoisesTezos\\": "src/CryptoNoisesTezos"
+        }
+    },
+    "config": {
+        "platform": {
+            "php": "7.4.27"
+        }
+    }
+}

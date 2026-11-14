@@ -1,0 +1,983 @@
+<?php
+
+namespace CryptoNoises\Bots;
+
+use CryptoCore\Time;
+use CryptoNoises\Bots\Core\NotificationSendFailedException;
+use CryptoNoises\Bots\Core\NotificationSendSkippedException;
+use CryptoNoises\Config;
+use CryptoNoises\Core\CustomData;
+use CryptoNoises\Core\URL;
+use CryptoNoises\Entities\CoinExchange;
+use CryptoNoises\Entities\Marketplace;
+use CryptoNoises\Entities\OptionsNotifier;
+use CryptoNoises\Entities\Token;
+use CryptoNoises\Entities\User;
+use CryptoNoises\Enum;
+use CryptoNoises\GatewayTezos;
+use CryptoNoises\Helpers\Helper;
+use CryptoNoises\Localize\Notification;
+use CryptoNoises\Localize\NotificationButton;
+use CryptoNoises\Localize\Phrase;
+use CryptoNoises\Models;
+use CryptoNoises\Networks\AbstractNetwork;
+use CryptoNoises\Networks\Tezos\TezosHelper;
+
+trait AbstractBot_Notification_Events
+{
+    /**
+     * @param User $user
+     * @param array $notificationItem
+     * @param array $eventItem
+     * @return Notification
+     * @throws NotificationSendFailedException
+     * @throws NotificationSendSkippedException
+     */
+    public function doNotifyEventFlow(User $user, array $notificationItem, array $eventItem): Notification
+    {
+        /** @var Token $tokenEntity */
+        $tokenEntity = null;
+
+        if ($eventItem['token_address'] && $eventItem['token_id'] !== null)
+        {
+            $tokenEntity = GatewayTezos\Tokens::GetTokenDetails($eventItem['token_address'], $eventItem['token_id'], true);
+
+            if ($tokenEntity === null)
+                throw new NotificationSendFailedException("Cannot find token {$eventItem['token_address']}:{$eventItem['token_id']}");
+
+            $tokenEntity->amount = $eventItem['quantity'];
+        }
+
+        //--------------------------------------------------------------------------------------------------------------
+
+        $notificationType = $notificationItem['notification_type'];
+
+        // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // PreFixes
+
+        if ($notificationType == Enum\NotificationType::Liquidity_Invest)
+        {   // Liquidity deposits are reported as a plain expense
+            $notificationType = Enum\NotificationType::Expense;
+
+            // Reset fields!
+            $eventItem['revenue']           = null;
+            $eventItem['currency_address']  = null;
+        }
+
+        // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        /** @var Notification $notification */
+
+        if ($notificationType == Enum\NotificationType::Income)
+        {
+            $notifyFilter   = OptionsNotifier::kNotify_Income;
+            $notification   = Notification\Transaction\CoinsIncome::ByQuantity($user, $eventItem['quantity']);
+            $thresholdScope = OptionsNotifier::kThresholdTransaction;
+        }
+        else if ($notificationType == Enum\NotificationType::Expense)
+        {
+            $notifyFilter   = OptionsNotifier::kNotify_Expense;
+            $notification   = Notification\Transaction\CoinsExpense::ByQuantity($user, $eventItem['quantity']);
+            $thresholdScope = OptionsNotifier::kThresholdTransaction;
+        }
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        else if ($notificationType == Enum\NotificationType::TokenBuy)
+        {
+            $notifyFilter   = OptionsNotifier::kNotify_TokenPurchased;
+            switch ($eventItem['event_details'])
+            {
+                case Enum\EventFlowDetails::AuctionConclude:    $notification = Notification\Transaction\AuctionWin::I($user); break;
+                case Enum\EventFlowDetails::OfferAccepted:      $notification = Notification\Transaction\NftOffer_Accepted_Purchased::I($user); break;
+                default:                                        $notification = Notification\Transaction\NftPurchased::I($user); break;
+            }
+            $thresholdScope = OptionsNotifier::kThresholdTransaction;
+        }
+        else if ($notificationType == Enum\NotificationType::TokenSell)
+        {
+            $notifyFilter   = OptionsNotifier::kNotify_TokenSold;
+            switch ($eventItem['event_details'])
+            {
+                case Enum\EventFlowDetails::AuctionConclude:    $notification = Notification\Transaction\AuctionSold::I($user); break;
+                case Enum\EventFlowDetails::OfferAccepted:      $notification = Notification\Transaction\NftOffer_Accepted_Sold::I($user); break;
+                default:                                        $notification = Notification\Transaction\NftSold::I($user); break;
+            }
+            $thresholdScope = OptionsNotifier::kThresholdTransaction;
+        }
+        else if ($notificationType == Enum\NotificationType::TokenRoyalty)
+        {
+            $notifyFilter   = OptionsNotifier::kNotify_TokenRoyalty;
+            $notification   = Notification\Transaction\NftRoyalty::I($user);
+            $thresholdScope = OptionsNotifier::kThresholdTransaction;
+        }
+        else if ($notificationType == Enum\NotificationType::TokenPurchaseStoreFee)
+        {
+            $notifyFilter   = OptionsNotifier::kNotify_TokenSold;
+            $notification   = Notification\Transaction\NftPurchaseStoreFee::I($user);
+            $thresholdScope = OptionsNotifier::kThresholdTransaction;
+        }
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        else if ($notificationType == Enum\NotificationType::TokenOffer)
+        {
+            $notifyFilter   = OptionsNotifier::kNotify_TokenOffer;
+            $notification   = $eventItem['currency_address'] !== null
+                ? Notification\Transaction\NftOffer_InTokens::I($user)
+                : Notification\Transaction\NftOffer_InCoins::I($user);
+            $thresholdScope = OptionsNotifier::kThresholdOffer;
+        }
+        else if ($notificationType == Enum\NotificationType::CollectionOffer)
+        {
+            $notifyFilter   = OptionsNotifier::kNotify_TokenOffer;
+            $notification   = $eventItem['currency_address'] !== null
+                ? Notification\Transaction\CollectionOffer_InTokens::I($user)
+                : Notification\Transaction\CollectionOffer_InCoins::I($user);
+            $thresholdScope = OptionsNotifier::kThresholdOffer;
+        }
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        else if ($notificationType == Enum\NotificationType::TokenList)
+        {
+            $notifyFilter   = OptionsNotifier::kNotify_TokenList;
+            $notification   = Notification\Transaction\NftList::I($user);
+            $thresholdScope = null;
+        }
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        else if ($notificationType == Enum\NotificationType::TokenMint)
+        {
+            $notifyFilter   = OptionsNotifier::kNotify_TokenMint;
+            $notification   = Notification\Transaction\NftMint::I($user);
+            $thresholdScope = null;
+        }
+        else if ($notificationType == Enum\NotificationType::TokenMint_Income)
+        {
+            $notifyFilter   = OptionsNotifier::kNotify_TokenSold;
+            $notification   = Notification\Transaction\NftMint_Income::I($user);
+            $thresholdScope = OptionsNotifier::kThresholdTransaction;
+        }
+        else if ($notificationType == Enum\NotificationType::TokenMint_Expense)
+        {
+            $notifyFilter   = OptionsNotifier::kNotify_TokenPurchased;
+            $notification   = Notification\Transaction\NftMint_Expense::I($user);
+            $thresholdScope = OptionsNotifier::kThresholdTransaction;
+        }
+        else if ($notificationType == Enum\NotificationType::TokenMint_Income_Ticket)
+        {
+            $notifyFilter   = OptionsNotifier::kNotify_TokenSold;
+            $notification   = Notification\Transaction\FxHashTicketMint_Income::I($user);
+            $thresholdScope = OptionsNotifier::kThresholdTransaction;
+        }
+        else if ($notificationType == Enum\NotificationType::TokenMint_Expense_Ticket)
+        {
+            $notifyFilter   = OptionsNotifier::kNotify_TokenPurchased;
+            $notification   = Notification\Transaction\FxHashTicketMint_Expense::I($user);
+            $thresholdScope = OptionsNotifier::kThresholdTransaction;
+        }
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        else if ($notificationType == Enum\NotificationType::TokenUpdateMetadata)
+        {
+            $notifyFilter   = OptionsNotifier::kNotify_TokenUpdateMetadata;
+            $notification   = Notification\Transaction\NftUpdateMetadata::I($user);
+            $thresholdScope = null;
+        }
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # Token Receive/Send may be as: { coin | nft | undefined-token }
+        else if ($notificationType == Enum\NotificationType::TokenReceive)
+        {
+            if ($tokenEntity === null)
+                throw new NotificationSendFailedException('Token transfer without a token');
+
+            if ($tokenEntity->isNftToken())
+            {
+                $notifyFilter   = OptionsNotifier::kNotify_TokenReceive;
+                $notification   = Notification\Transaction\NftTransfer_Receive::I($user);
+            }
+            else if ($tokenEntity->isCoinToken())
+            {
+                $notifyFilter   = OptionsNotifier::kNotify_Income;
+                $notification   = Notification\Transaction\TokenTransfer_Receive::I($user);
+            }
+            else if ($tokenEntity->isDomainToken())
+            {
+                $notifyFilter   = null;
+                $notification   = Notification\Transaction\DomainTransfer_Receive::I($user);
+            }
+            else
+            {
+                $notifyFilter   = OptionsNotifier::kNotify_TokenReceive;
+                $notification   = Notification\Transaction\TokenTransfer_Receive_Undefined::I($user);
+            }
+            $thresholdScope = null;
+        }
+        else if ($notificationType == Enum\NotificationType::TokenSend)
+        {
+            if ($tokenEntity === null)
+                throw new NotificationSendFailedException('Token transfer without a token');
+
+            if($tokenEntity->isNftToken())
+            {
+                $notifyFilter   = OptionsNotifier::kNotify_TokenSend;
+                $notification   = Notification\Transaction\NftTransfer_Send::I($user);
+            }
+            else if ($tokenEntity->isCoinToken())
+            {
+                $notifyFilter   = OptionsNotifier::kNotify_Expense;
+                $notification   = Notification\Transaction\TokenTransfer_Send::I($user);
+            }
+            else if($tokenEntity->isDomainToken())
+            {
+                $notifyFilter   = null;
+                $notification   = Notification\Transaction\DomainTransfer_Send::I($user);
+            }
+            else
+            {
+                $notifyFilter   = OptionsNotifier::kNotify_TokenSend;
+                $notification   = Notification\Transaction\TokenTransfer_Send_Undefined::I($user);
+            }
+            $thresholdScope = null;
+        }
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        else if ($notificationType == Enum\NotificationType::AuctionStart)
+        {
+            $notifyFilter   = OptionsNotifier::kNotify_Auction;
+            $notification   = Notification\Transaction\AuctionStart::I($user);
+            $thresholdScope = null;
+        }
+        else if ($notificationType == Enum\NotificationType::AuctionEnd_NoWinner)
+        {
+            $notifyFilter   = OptionsNotifier::kNotify_Auction;
+            $notification   = Notification\Transaction\AuctionEnd_NoWinner::I($user);
+            $thresholdScope = null;
+        }
+        else if ($notificationType == Enum\NotificationType::AuctionCancel)
+        {
+            $notifyFilter   = OptionsNotifier::kNotify_Auction;
+            $notification   = Notification\Transaction\AuctionCancel::I($user);
+            $thresholdScope = null;
+        }
+        else if ($notificationType == Enum\NotificationType::AuctionBid)
+        {
+            $notifyFilter   = OptionsNotifier::kNotify_Auction;
+            $notification   = Notification\Transaction\AuctionBid::I($user);
+            $thresholdScope = null;
+        }
+        else if ($notificationType == Enum\NotificationType::AuctionOutBid)
+        {
+            $notifyFilter   = OptionsNotifier::kNotify_Auction;
+            $notification   = Notification\Transaction\AuctionOutBid::I($user);
+            $thresholdScope = null;
+        }
+        else if ($notificationType == Enum\NotificationType::AuctionOwnerInfo)
+        {
+            $notifyFilter   = OptionsNotifier::kNotify_Auction;
+            $notification   = Notification\Transaction\AuctionOwnerInfo::I($user);
+            $thresholdScope = null;
+        }
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        else if ($notificationType == Enum\NotificationType::DomainExpires)
+        {
+            $notifyFilter   = OptionsNotifier::kNotify_Domains;
+            $notification   = Notification\DomainExpires::I($user);
+            $thresholdScope = null;
+        }
+        else if ($notificationType == Enum\NotificationType::DomainExpired)
+        {
+            $notifyFilter   = OptionsNotifier::kNotify_Domains;
+            $notification   = Notification\DomainExpired::I($user);
+            $thresholdScope = null;
+        }
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        else if ($notificationType == Enum\NotificationType::Exchange_CoinsToToken)
+        {
+            $notifyFilter   = OptionsNotifier::kNotify_Expense;
+            $notification   = Notification\Transaction\Exchange_CoinsToToken::I($user);
+            $thresholdScope = OptionsNotifier::kThresholdTransaction;
+        }
+        else if ($notificationType == Enum\NotificationType::Exchange_TokenToCoins)
+        {
+            $notifyFilter   = OptionsNotifier::kNotify_Income;
+            $notification   = Notification\Transaction\Exchange_TokenToCoins::I($user);
+            $thresholdScope = OptionsNotifier::kThresholdTransaction;
+        }
+        else if ($notificationType == Enum\NotificationType::Exchange_TokenToToken)
+        {
+            $notifyFilter   = [OptionsNotifier::kNotify_Expense, OptionsNotifier::kNotify_Income];
+            $notification   = Notification\Transaction\Exchange_TokenToToken::I($user);
+            $thresholdScope = null;
+        }
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        else
+            throw new NotificationSendFailedException("Cannot detect config by type [$notificationType]");
+
+        //--------------------------------------------------------------------------------------------------------------
+
+        $network = AbstractNetwork::GetNetworkById($eventItem['network_id']);
+
+        if ($network === null)
+            throw new NotificationSendFailedException("Cannot detect network [{$eventItem['network_id']}]");
+
+        if ($notificationItem['owner_adid'])
+        {
+            $wallet = $user->getWalletByAdid($notificationItem['owner_adid']);
+
+            // @Notice: this may be in situation when:
+            // - notification queue already generated and all items has 'idle' state
+            // - user delete wallet
+            // - and after notifications try to send to the user
+            // So need just skip this notifications
+
+            if ($wallet == null)
+                throw new NotificationSendSkippedException('Wallet was deleted by the user');
+
+            $wallet->syncBalanceIfOutOfDate();
+
+            $coinsExchanger = CoinExchange::CreateByWallet($wallet);
+        }
+        else
+        {
+            $wallet = null;
+            $coinsExchanger = null;
+        }
+
+        //--------------------------------------------------------------------------------------------------------------
+        // Check whether this notification type is enabled
+
+        if ($notifyFilter !== null)
+        {
+            if (!is_array($notifyFilter))
+                $notifyFilter = [$notifyFilter];
+
+            foreach ($notifyFilter as $notifyFilterId)
+            {
+                if (!$user->options()->isNotify($notifyFilterId))
+                    throw new NotificationSendSkippedException("Filter-by-type rule (user-level) #$notifyFilterId");
+
+                if ($wallet && !$wallet->options()->isNotify($notifyFilterId))
+                    throw new NotificationSendSkippedException("Filter-by-type rule (wallet-level) #$notifyFilterId");
+            }
+        }
+
+        //--------------------------------------------------------------------------------------------------------------
+
+        $customData = $eventItem['custom_data'] ? json_decode($eventItem['custom_data'], true) : null;
+
+        // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Pre-update royalty-values for special states
+
+        if ($notificationType == Enum\NotificationType::TokenSell ||
+            $notificationType == Enum\NotificationType::TokenRoyalty)
+        {
+            if ($eventItem['royalty_address'] === null)
+            {
+                $address = $notificationItem['owner_address'];
+
+                if (isset($customData[CustomData::kROYALTIES][$address]))
+                {
+                    $eventItem['royalty_address'] = $address;
+                    $eventItem['royalty']         = $customData[CustomData::kROYALTIES][$address];
+                }
+            }
+        }
+
+        // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+        $amountInCoins          = null;
+
+        /** @var Token $amountInTokenEntity */
+        $amountInTokenEntity    = null;
+
+        /** @var Token $amountInTokenEntity1st */
+        $amountInTokenEntity1st = null;
+
+        /** @var Token $amountInTokenEntity2nd */
+        $amountInTokenEntity2nd = null;
+
+        // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+        switch ($notificationType)
+        {
+            case Enum\NotificationType::Income:
+            case Enum\NotificationType::Expense:
+
+            case Enum\NotificationType::TokenList:
+            case Enum\NotificationType::TokenMint_Income:
+            case Enum\NotificationType::TokenMint_Income_Ticket:
+            case Enum\NotificationType::TokenMint_Expense:
+            case Enum\NotificationType::TokenMint_Expense_Ticket:
+
+            case Enum\NotificationType::TokenBuy:
+            case Enum\NotificationType::TokenOffer:
+
+            case Enum\NotificationType::CollectionOffer:
+
+            case Enum\NotificationType::AuctionStart:
+            case Enum\NotificationType::AuctionEnd_NoWinner:
+            case Enum\NotificationType::AuctionCancel:
+            case Enum\NotificationType::AuctionBid:
+            case Enum\NotificationType::AuctionOutBid:
+            case Enum\NotificationType::AuctionOwnerInfo:
+                list ($amountInCoins, $amountInTokenEntity) = $this->initializeAmounts($eventItem, $eventItem['price']);
+                break;
+
+            // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+            case Enum\NotificationType::TokenSell:
+                $amount = $eventItem['revenue'];
+
+                if ($eventItem['sender_address'] == $eventItem['royalty_address'])
+                    $amount += $eventItem['royalty'];
+
+                list ($amountInCoins, $amountInTokenEntity) = $this->initializeAmounts($eventItem, $amount);
+
+                unset($amount);
+                break;
+
+            case Enum\NotificationType::TokenRoyalty:
+                if ($eventItem['royalty'] == null)
+                    throw new NotificationSendFailedException('Royalty value is empty');
+
+                list ($amountInCoins, $amountInTokenEntity) = $this->initializeAmounts($eventItem, $eventItem['royalty']);
+                break;
+
+            case Enum\NotificationType::TokenPurchaseStoreFee:
+                list ($amountInCoins, $amountInTokenEntity) = $this->initializeAmounts($eventItem, $eventItem['fee']);
+                break;
+
+            // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+            case Enum\NotificationType::Exchange_CoinsToToken:
+                $amountInCoins       = $eventItem['price'];
+                $amountInTokenEntity = $this->getTokenCoinEntity($eventItem['network_id'], $eventItem['currency_address']);
+                $amountInTokenEntity->amount = $eventItem['revenue'];
+                break;
+
+            case Enum\NotificationType::Exchange_TokenToCoins:
+                $amountInCoins       = $eventItem['revenue'];
+                $amountInTokenEntity = $this->getTokenCoinEntity($eventItem['network_id'], $eventItem['currency_address']);
+                $amountInTokenEntity->amount = $eventItem['price'];
+                break;
+
+            case Enum\NotificationType::Exchange_TokenToToken:
+                $amountInTokenEntity1st = $this->getTokenCoinEntity($eventItem['network_id'], $eventItem['currency_address']);
+                $amountInTokenEntity1st->amount = $eventItem['price'];
+
+                $amountInTokenEntity2nd = $this->getTokenCoinEntity($eventItem['network_id'], $eventItem['currency_address_2nd']);
+                $amountInTokenEntity2nd->amount = $eventItem['revenue'];
+                break;
+
+            // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+            case Enum\NotificationType::TokenMint:
+
+            case Enum\NotificationType::DomainExpires:
+            case Enum\NotificationType::DomainExpired:
+
+            case Enum\NotificationType::TokenSend:
+            case Enum\NotificationType::TokenReceive:
+            case Enum\NotificationType::TokenUpdateMetadata:
+                break;
+
+            default:
+                throw new NotificationSendFailedException("Unknown notification type [{$notificationItem['notification_type']}]");
+        }
+
+        //--------------------------------------------------------------------------------------------------------------
+        // Check filters by threshold
+
+        if ($thresholdScope !== null)
+        {
+            $amountInXtz = $amountInCoins;
+
+            // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+            if ($amountInXtz == 0 && $amountInTokenEntity)
+            {
+                $amountInXtz = $amountInTokenEntity->convertTokenPriceToXtz();
+            }
+
+            // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+            if ($amountInXtz > 0)
+            {
+                if ($amountInXtz < $user->options()->getThreshold($thresholdScope))
+                    throw new NotificationSendSkippedException("Threshold-$thresholdScope (user-level) [$amountInXtz < ".$user->options()->getThreshold($thresholdScope)."]");
+
+                if ($wallet && $amountInXtz < $wallet->options()->getThreshold($thresholdScope))
+                    throw new NotificationSendSkippedException("Threshold-$thresholdScope (wallet-level) [$amountInXtz < ".$wallet->options()->getThreshold($thresholdScope)."]");
+            }
+
+            // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+            unset($amountInXtz);
+        }
+
+        //--------------------------------------------------------------------------------------------------------------
+        // Resolve the marketplace, if any
+
+        $marketplace = TezosHelper::GetMarketplace($eventItem['marketplace_address'], $eventItem['token_address']);
+
+        $notification->bindWallet($wallet);
+
+        // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+        if ($notificationType == Enum\NotificationType::TokenMint ||
+            $notificationType == Enum\NotificationType::TokenList ||
+            $notificationType == Enum\NotificationType::TokenUpdateMetadata)
+        {
+            if ($tokenEntity && $tokenEntity->isNftToken())
+            {
+                $notification->appendNftTags($tokenEntity);
+                $notification->appendNftAttributes($tokenEntity);
+            }
+        }
+
+        // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+        if ($notificationType == Enum\NotificationType::TokenMint ||
+            $notificationType == Enum\NotificationType::TokenList)
+        {
+            // royalty_percent stored as decimals=4
+            $notification->bind('{###ROYALTY_PERCENT###}',
+                $eventItem['royalty_percent']
+                ? Helper::TrimRightZerosInNumber($eventItem['royalty_percent']/100).'%'
+                : Notification::HIDE_ME);
+
+            $notification->bind('{###EDITIONS###}',
+                $notification->getFriendlyQuantityValue($tokenEntity->getCurrentEditions()));
+        }
+
+        //--------------------------------------------------------------------------------------------------------------
+
+        // fx(hash) iteration index: each mint shows its own
+        if ($notificationType == Enum\NotificationType::TokenMint_Expense &&
+            isset($customData[CustomData::kITERATION_IDX]))
+        {
+            $iterationIndex        = $customData[CustomData::kITERATION_IDX];
+
+            $iterationMarketUrlId  = (string) $customData[CustomData::kITERATION_MARKET_URL_ID];
+            $iterationTokenAddress = '';
+            $iterationTokenId      = (string) $customData[CustomData::kITERATION_TOKEN_ID];
+
+            $iterationMarketUrlItem = Models\Shared\MarketUrls::model()->getItemById($iterationMarketUrlId);
+
+            if ($iterationMarketUrlItem == null)
+                throw new NotificationSendFailedException("Cannot find marketUrlItem by id=[$iterationMarketUrlId]");
+
+            $iterationRedirectUrl = URL::InnerRedirectToToken($iterationMarketUrlItem, $iterationTokenAddress, $iterationTokenId);
+
+            $notification->bind('{###ITERATION_IDX###}', $iterationIndex);
+            $notification->bind('{###ITERATION_URL###}', $iterationRedirectUrl);
+
+            // These variables are used again below (details buttons), so they are not unset
+        }
+
+        // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+        if ($eventItem['sender_address'])
+        {
+            $notification->bind('{###SENDER_ADDRESS###}',       Notification::SafeText($network->getWalletPublicName($eventItem['sender_address'])));
+            $notification->bind('{###SENDER_PROFILE_URL###}',   $this->getUserProfileUrl($network, $marketplace, $eventItem['sender_address']));
+        }
+        else
+        {
+            $notification->bind('{###SENDER_ADDRESS###}',       Notification::HIDE_ME);
+            $notification->bind('{###SENDER_PROFILE_URL###}',   Notification::HIDE_ME);
+        }
+
+        if ($eventItem['target_address'])
+        {
+            $notification->bind('{###TARGET_ADDRESS###}',       Notification::SafeText($network->getWalletPublicName($eventItem['target_address'])));
+            $notification->bind('{###TARGET_PROFILE_URL###}',   $this->getUserProfileUrl($network, $marketplace, $eventItem['target_address']));
+        }
+        else
+        {
+            $notification->bind('{###TARGET_ADDRESS###}',       Notification::HIDE_ME);
+            $notification->bind('{###TARGET_PROFILE_URL###}',   Notification::HIDE_ME);
+        }
+
+        // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+        if ($tokenEntity && $tokenEntity->isCoinToken())
+        {
+            // The same placeholder is bound again below for token amounts; the two cases never meet in one notification
+            $notification->bind('{###TOKEN_AMOUNT_WITH_CURRENCY###}', Notification::SafeText($tokenEntity->getFriendlyCoinsAmount()));
+        }
+
+        // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+        if ($amountInCoins !== null)
+        {
+            // Always bind the value, even 0: the placeholders share lines with other text, so HIDE_ME would drop the
+            // whole line. For the same reason an empty AMOUNT_TOTAL_CONVERTED is bound as '', not HIDE_ME.
+
+            $notification->bind('{###AMOUNT_TOTAL###}',             $network->getCoinsFriendlyFullValue($amountInCoins));
+            $notification->bind('{###AMOUNT_TOTAL_CONVERTED###}',   $coinsExchanger ? $coinsExchanger->convertToString($amountInCoins) : '');
+
+            $notification->bind('{###QUANTITY###}',                 $notification->getFriendlyQuantityValue($eventItem['quantity']));
+        }
+
+        if ($amountInTokenEntity)
+        {
+            $notification->bind('{###TOKEN_AMOUNT_WITH_CURRENCY###}',   Notification::SafeText($amountInTokenEntity->getFriendlyCoinsAmount()));
+
+            if ($amountInCoins === null)
+            {   // same values as for coins, but in tokens
+                $notification->bind('{###AMOUNT_TOTAL###}',             Notification::SafeText($amountInTokenEntity->getFriendlyCoinsAmount()));
+                $notification->bind('{###AMOUNT_TOTAL_CONVERTED###}',   '');
+
+                $notification->bind('{###QUANTITY###}',                 Notification::HIDE_ME);
+            }
+        }
+
+        if ($amountInTokenEntity1st)
+        {
+            $notification->bind('{###TOKEN_AMOUNT_1ST_WITH_CURRENCY###}',   Notification::SafeText($amountInTokenEntity1st->getFriendlyCoinsAmount()));
+        }
+
+        if ($amountInTokenEntity2nd)
+        {
+            $notification->bind('{###TOKEN_AMOUNT_2ND_WITH_CURRENCY###}',   Notification::SafeText($amountInTokenEntity2nd->getFriendlyCoinsAmount()));
+        }
+
+        if ($amountInCoins === null && $amountInTokenEntity === null)
+        {   // For example for mint events
+            $notification->bind('{###AMOUNT_TOTAL###}',                 Notification::HIDE_ME);
+            $notification->bind('{###AMOUNT_TOTAL_CONVERTED###}',       Notification::HIDE_ME);
+            $notification->bind('{###QUANTITY###}',                     $notification->getFriendlyQuantityValue($eventItem['quantity']));
+        }
+
+        // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+        if ($notificationType == Enum\NotificationType::TokenRoyalty ||
+            $notificationType == Enum\NotificationType::TokenPurchaseStoreFee)
+        {
+            list ($fullPriceInCoins, $fullPriceInTokenEntity) = $this->initializeAmounts($eventItem, $eventItem['price']);
+
+            if ($fullPriceInCoins !== null)
+            {
+                $notification->bind('{###FULL_SELL_PRICE###}',              $network->getCoinsFriendlyFullValue($fullPriceInCoins));
+                $notification->bind('{###FULL_SELL_PRICE_CONVERTED###}',    $coinsExchanger ? $coinsExchanger->convertToString($fullPriceInCoins) : null);
+            }
+            else if ($fullPriceInTokenEntity)
+            {
+                $notification->bind('{###FULL_SELL_PRICE###}',              Notification::SafeText($fullPriceInTokenEntity->getFriendlyCoinsAmount()));
+                $notification->bind('{###FULL_SELL_PRICE_CONVERTED###}',    '');
+            }
+            else
+                throw new NotificationSendFailedException('Cannot detect full-sell-price for royalty notification');
+        }
+
+        // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // @notice: $tokenEntity may be null, but token_address & token_id may be defined!
+
+        if ($eventItem['token_address'] && $eventItem['token_id'] !== null)
+        {
+            $notification->bind('{###TOKEN_CONTRACT_NAME###}',      $network->getContractShortName($eventItem['token_address']));
+            $notification->bind('{###TOKEN_CONTRACT_URL###}',       $network->getContractPublicUrl($eventItem['token_address']));
+
+            $notification->bind('{###TOKEN_ID###}',                 $eventItem['token_id']);
+
+            // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+            if ($tokenEntity && $tokenEntity->isCoinToken())
+            {
+                // Some tokens have `tokenType IS NULL` and `decimals > 0`, so they are coins. Their mint events
+                // still need the token data bound, otherwise some fields stay empty and the notification is broken.
+
+                if ($notificationType == Enum\NotificationType::TokenMint)
+                    $this->bindTokenDataByEntity($notification, $network, $marketplace, $tokenEntity);
+            }
+            else if ($tokenEntity && ($tokenEntity->isNftToken() || $tokenEntity->isDomainToken()))
+            {
+                $this->bindTokenDataByEntity($notification, $network, $marketplace, $tokenEntity);
+            }
+            else
+            {
+                $this->bindTokenDataByEventItem($notification, $network, $marketplace, $eventItem);
+            }
+        }
+
+        // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // Spec data
+
+        if (isset($customData[CustomData::kAUCTION_ID]))
+        {
+            // Needed only when the token of the auction cannot be resolved
+            $auctionName = '#'.$customData[CustomData::kAUCTION_ID];
+
+            $notification->bind('{###AUCTION_NAME###}',             $auctionName);
+            $notification->bind('{###AUCTION_NAME_ESCAPED###}',     htmlspecialchars($auctionName, ENT_QUOTES));
+
+            if (!empty($customData[CustomData::kAUCTION_TOP_BID]))
+            {
+                $topBid   = $customData[CustomData::kAUCTION_TOP_BID];
+                $topOwner = $customData[CustomData::kAUCTION_TOP_OWNER];
+
+                if ($amountInTokenEntity)
+                {
+                    $notification->bind('{###AMOUNT_TOP_BID###}',           Notification::SafeText($amountInTokenEntity->getFriendlyCoinsAmount($topBid)));
+                    $notification->bind('{###AMOUNT_TOP_BID_CONVERTED###}', Notification::HIDE_ME);
+                }
+                else
+                {
+                    $notification->bind('{###AMOUNT_TOP_BID###}',           $network->getCoinsFriendlyFullValue($topBid));
+                    $notification->bind('{###AMOUNT_TOP_BID_CONVERTED###}', $coinsExchanger ? $coinsExchanger->convertToString($topBid) : null);
+                }
+
+                $notification->bind('{###TOP_OWNER_ADDRESS###}',            Notification::SafeText($network->getWalletPublicName($topOwner)));
+                $notification->bind('{###TOP_OWNER_PROFILE_URL###}',        $this->getUserProfileUrl($network, $marketplace, $topOwner));
+
+                unset($topBid, $topOwner);
+            }
+
+            unset($auctionName);
+        }
+
+        // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+        if (!empty($customData[CustomData::kAUCTION_DIRECT_PRICE]))
+            $notification->bind('{###AUCTION_DIRECT_PRICE###}', $network->getCoinsFriendlyFullValue($customData[CustomData::kAUCTION_DIRECT_PRICE]));
+        else
+            $notification->bind('{###AUCTION_DIRECT_PRICE###}', Notification::HIDE_ME);
+
+        if (!empty($customData[CustomData::kAUCTION_BID_INC_PCT]))
+            $notification->bind('{###AUCTION_BID_INC_PCT###}', $customData[CustomData::kAUCTION_BID_INC_PCT].'%');
+        else
+            $notification->bind('{###AUCTION_BID_INC_PCT###}', Notification::HIDE_ME);
+
+        if (!empty($customData[CustomData::kDURATION]))
+            $notification->bind('{###DURATION###}', Phrase::FriendlyDuration($customData[CustomData::kDURATION]));
+        else
+            $notification->bind('{###DURATION###}', Notification::HIDE_ME);
+
+        if (!empty($customData[CustomData::kBURN_ON_END]))
+            $notification->bind('{###BURN_ON_END###}',  Phrase::I()->yes);
+        else
+            $notification->bind('{###BURN_ON_END###}',  Notification::HIDE_ME);
+
+        // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+        if (isset($customData[CustomData::kDOMAIN]))
+        {
+            $expireDateTime = $customData[CustomData::kEXPIRED];
+            $expireDuration = strtotime($expireDateTime) - Time::Time();
+
+            $notification->bind('{###DOMAIN###}',           $customData[CustomData::kDOMAIN]);
+            $notification->bind('{###DOMAIN_RENEW_URL###}', $customData[CustomData::kDOMAIN_RENEW_URL]);
+
+            $notification->bind('{###EXPIRE_DATETIME###}',  Phrase::FriendlyDateTime($expireDateTime));
+            $notification->bind('{###EXPIRE_DURATION###}',  Phrase::FriendlyDuration($expireDuration));
+        }
+
+        // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        // NFT Marketplace
+
+        if ($marketplace)
+        {
+            if ($marketplace->name)
+                $notification->bind('{###MARKETPLACE_NAME###}', $marketplace->name);
+            else
+                $notification->bind('{###MARKETPLACE_NAME###}', Notification::HIDE_ME);
+
+            if ($eventItem['token_address'] && $eventItem['token_id'] !== null)
+            {
+                $detailsButtons = [];
+
+                [$marketplaceTokenUrl, $buttonCaption] = $marketplace->getTokenUrlAndButtonCaption(0,
+                    $eventItem['token_address'], $eventItem['token_id']);
+
+                if ($marketplaceTokenUrl)
+                    $notification->bind('{###TOKEN_STORE_URL###}', $marketplaceTokenUrl);
+
+                if ($marketplaceTokenUrl && $buttonCaption)
+                    $detailsButtons[] = NotificationButton::Link($buttonCaption, $marketplaceTokenUrl);
+
+                // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+                // fx(hash) iteration index: link to the minted iteration
+                if (isset($iterationMarketUrlItem) && isset($iterationRedirectUrl))
+                {
+                    $detailsButtons[] = NotificationButton::Link($iterationMarketUrlItem['button_caption'],
+                        $iterationRedirectUrl
+                    );
+                }
+
+                // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+                // Extra links
+
+                for ($extraIndex=1; $extraIndex<=4; $extraIndex++)
+                {
+                    [$marketplaceTokenUrl, $buttonCaption] = $marketplace->getTokenUrlAndButtonCaption($extraIndex,
+                        $eventItem['token_address'], $eventItem['token_id']);
+
+                    if ($marketplaceTokenUrl && $buttonCaption)
+                        $detailsButtons[] = NotificationButton::Link($buttonCaption, $marketplaceTokenUrl);
+                }
+
+                // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+                if (!empty($detailsButtons))
+                    $notification->prependButtonsAsRows($detailsButtons, Config::cfg()->uiNftDetailsButtonsPerRow);
+
+                unset($detailsButtons);
+            }
+        }
+        else
+        {
+            $notification->bind('{###MARKETPLACE_NAME###}', Notification::HIDE_ME);
+        }
+
+        // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+        if ($tokenEntity && ($tokenEntity->isNftToken() || $tokenEntity->isDomainToken()))
+        {
+            $notification->setPreviewThumbnailUrl($tokenEntity->thumbnailUrl);
+            $notification->setPreviewAnimationUrl($tokenEntity->animationUrl);
+            $notification->setPreviewMovieClipUrl($tokenEntity->movieClipUrl);
+        }
+
+        // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+        $notification->bindDebugClassName()
+            ->bindDebugArray('eventItem',                   $eventItem,                 'event_flow_id')
+            ->bindDebugArray('notificationItem',            $notificationItem,          'event_notification_id')
+            ->bindDebugToken('tokenEntity',                 $tokenEntity)
+            ->bindDebugToken('amountInTokenEntity',         $amountInTokenEntity)
+            ->bindDebugToken('amountInTokenEntity1st',      $amountInTokenEntity1st)
+            ->bindDebugToken('amountInTokenEntity2nd',      $amountInTokenEntity2nd)
+            ->bindDebugMarketplace($marketplace)
+            ;
+
+        return $notification;
+    }
+
+    //==================================================================================================================
+
+    /**
+     * @param string $networkId
+     * @param string $tokenAddressWithTokenId
+     * @return Token
+     * @throws NotificationSendFailedException
+     */
+    private function getTokenCoinEntity(string $networkId, string $tokenAddressWithTokenId): Token
+    {
+        // Extract tokenId from address like 'ADDRESS:tokenId'
+        list ($tokenAddress, $tokenId) = array_pad(explode(':', $tokenAddressWithTokenId, 2), 2, null);
+
+        $tokenId = (int) $tokenId;
+
+        $token = GatewayTezos\Tokens::GetTokenDetails($tokenAddress, $tokenId);
+
+        if ($token === null)
+            throw new NotificationSendFailedException("Cannot detect token-entity #$tokenAddressWithTokenId");
+
+        return $token;
+    }
+
+    /**
+     * @param array $eventItem
+     * @param $amountValue
+     * @return array[$amountInCoins, $amountInTokenEntity]
+     * @throws NotificationSendFailedException
+     */
+    private function initializeAmounts(array $eventItem, $amountValue): array
+    {
+        $amountInCoins       = null;
+        $amountInTokenEntity = null;
+
+        if ($eventItem['currency_address'] !== null)
+        {
+            $amountInTokenEntity = $this->getTokenCoinEntity($eventItem['network_id'], $eventItem['currency_address']);
+            $amountInTokenEntity->amount = $amountValue;
+        }
+        else
+        {
+            $amountInCoins = $amountValue;
+        }
+
+        return [$amountInCoins, $amountInTokenEntity];
+    }
+
+    //==================================================================================================================
+
+    private function bindTokenDataByEntity(Notification $notification, AbstractNetwork $network, ?Marketplace $marketplace, Token $tokenEntity): void
+    {
+        $notification->bind('{###TOKEN_NAME###}',                       $tokenEntity->name);
+        $notification->bind('{###TOKEN_NAME_ESCAPED###}',               htmlspecialchars($tokenEntity->name, ENT_QUOTES));
+
+        if ($tokenEntity->creatorAddress)
+        {
+            $notification->bind('{###TOKEN_CREATOR_ADDRESS###}',        Notification::SafeText($network->getWalletPublicName($tokenEntity->creatorAddress)));
+            $notification->bind('{###TOKEN_CREATOR_PROFILE_URL###}',    $this->getUserProfileUrl($network, $marketplace, $tokenEntity->creatorAddress));
+        }
+        else
+        {
+            $notification->bind('{###TOKEN_CREATOR_ADDRESS###}',        Notification::HIDE_ME);
+            $notification->bind('{###TOKEN_CREATOR_PROFILE_URL###}',    Notification::HIDE_ME);
+        }
+
+        if ($tokenEntity->collectionName)
+        {
+            $tokensCollectionUrl = null;
+
+            if ($marketplace)
+                $tokensCollectionUrl = $marketplace->getCollectionUrl($tokenEntity->tokenAddress, $tokenEntity->collectionGroup, $tokenEntity->collectionId);
+
+            if ($tokensCollectionUrl == null)
+                $tokensCollectionUrl = $network->getTokenCollectionUrl($tokenEntity->tokenAddress);
+
+            $notification->bind('{###TOKENS_COLLECTION_NAME###}',       Notification::SafeText($tokenEntity->collectionName));
+            $notification->bind('{###TOKENS_COLLECTION_URL###}',        $tokensCollectionUrl);
+        }
+        else
+        {
+            $notification->bind('{###TOKENS_COLLECTION_NAME###}',       Notification::HIDE_ME);
+            $notification->bind('{###TOKENS_COLLECTION_URL###}',        Notification::HIDE_ME);
+        }
+
+        if ($tokenEntity->collectionId)
+            $notification->bind('{###TOKENS_COLLECTION_ID###}',         $tokenEntity->collectionId);
+        else
+            $notification->bind('{###TOKENS_COLLECTION_ID###}',         Notification::HIDE_ME);
+
+        // warning! This value may be overwritten by marketplace URL-pattern
+        $notification->bind('{###TOKEN_STORE_URL###}',                  $tokenEntity->tokenMarketUrl);
+    }
+
+    private function bindTokenDataByEventItem(Notification $notification, AbstractNetwork $network, ?Marketplace $marketplace, array $eventItem): void
+    {
+        $name = $network->getContractShortName($eventItem['token_address']).':'.$eventItem['token_id'];
+
+        $notification->bind('{###TOKEN_NAME###}',                       $name);
+        $notification->bind('{###TOKEN_NAME_ESCAPED###}',               htmlspecialchars($name, ENT_QUOTES));
+
+        if ($eventItem['royalty_address'])
+        {
+            $notification->bind('{###TOKEN_CREATOR_ADDRESS###}',        Notification::SafeText($network->getWalletPublicName($eventItem['royalty_address'])));
+            $notification->bind('{###TOKEN_CREATOR_PROFILE_URL###}',    $this->getUserProfileUrl($network, $marketplace, $eventItem['royalty_address']));
+        }
+        else
+        {
+            $notification->bind('{###TOKEN_CREATOR_ADDRESS###}',        Notification::HIDE_ME);
+            $notification->bind('{###TOKEN_CREATOR_PROFILE_URL###}',    Notification::HIDE_ME);
+        }
+
+        $notification->bind('{###TOKENS_COLLECTION_NAME###}',           $network->getContractShortName($eventItem['token_address']));
+        $notification->bind('{###TOKENS_COLLECTION_URL###}',            $network->getContractPublicUrl($eventItem['token_address']));
+        $notification->bind('{###TOKENS_COLLECTION_ID###}',             Notification::HIDE_ME);
+
+        // warning! This value may be overwritten by marketplace URL-pattern
+        $notification->bind('{###TOKEN_STORE_URL###}',                  $network->getTokenDefaultDetailsUrl($eventItem['token_address'], $eventItem['token_id']));
+    }
+
+    //==================================================================================================================
+
+    private function getUserProfileUrl(AbstractNetwork $network, ?Marketplace $marketplace, string $address): string
+    {
+        if ($marketplace)
+        {
+            $profileUrl = $marketplace->getUserProfileUrl($address);
+
+            if ($profileUrl)
+                return $profileUrl;
+        }
+
+        return $network->getAddressPublicUrl($address);
+    }
+}
